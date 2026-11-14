@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate index.html and sounds.json from the sounds/ tree."""
+"""Generate index.html and sounds.json from the vol. 1 and vol. 2 trees."""
 from __future__ import annotations
 
 import json
@@ -7,10 +7,25 @@ from collections import OrderedDict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SOUNDS = ROOT / "sounds"
 AUDIO_EXTS = {".mp3", ".ogg", ".wav", ".m4a", ".opus", ".flac", ".aac"}
 
-# Preferred folder order (pack categories, then any extras alphabetically)
+VOLUMES = [
+    {
+        "id": "vol1",
+        "title": "Vol. 1",
+        "dir": "sounds",
+        "source": "https://viscep.itch.io/diaperabdl",
+        "source_label": "Diaper/ABDL soundpack",
+    },
+    {
+        "id": "vol2",
+        "title": "Vol. 2",
+        "dir": "vol2",
+        "source": "https://viscep.itch.io/diaperabdl-soundpack-vol-2",
+        "source_label": "Diaper/ABDL soundpack vol. 2",
+    },
+]
+
 CATEGORY_ORDER = [
     "Filling",
     "Slow filling",
@@ -27,49 +42,58 @@ REVERB_ORDER = [
     "Room reverb",
     "Bathroom reverb",
 ]
+VOLUME_INDEX = {v["id"]: i for i, v in enumerate(VOLUMES)}
 
 
 def collect() -> list[dict]:
     items = []
-    for path in sorted(SOUNDS.rglob("*")):
-        if not path.is_file() or path.suffix.lower() not in AUDIO_EXTS:
+    for vol in VOLUMES:
+        base = ROOT / vol["dir"]
+        if not base.is_dir():
             continue
-        rel = path.relative_to(SOUNDS)
-        parts = rel.parts
-        if len(parts) >= 3:
-            category, variant, name = parts[0], parts[1], parts[-1]
-        elif len(parts) == 2:
-            category, variant, name = parts[0], "", parts[1]
-        else:
-            category, variant, name = "Other", "", parts[0]
-        items.append(
-            {
-                "file": rel.as_posix(),
-                "name": path.stem,
-                "filename": path.name,
-                "category": category,
-                "variant": variant or "Default",
-                "ext": path.suffix.lower().lstrip("."),
-                "bytes": path.stat().st_size,
-            }
-        )
+        for path in sorted(base.rglob("*")):
+            if not path.is_file() or path.suffix.lower() not in AUDIO_EXTS:
+                continue
+            rel = path.relative_to(base)
+            parts = rel.parts
+            if len(parts) >= 3:
+                category, variant = parts[0], parts[1]
+            elif len(parts) == 2:
+                category, variant = parts[0], ""
+            else:
+                category, variant = "Other", ""
+            items.append(
+                {
+                    "file": f"{vol['dir']}/{rel.as_posix()}",
+                    "name": path.stem,
+                    "filename": path.name,
+                    "volume": vol["id"],
+                    "volume_title": vol["title"],
+                    "source": vol["source"],
+                    "category": category,
+                    "variant": variant,
+                    "ext": path.suffix.lower().lstrip("."),
+                    "bytes": path.stat().st_size,
+                }
+            )
     return items
 
 
 def sort_key(item: dict):
     cat = item["category"]
     var = item["variant"]
+    vidx_vol = VOLUME_INDEX.get(item["volume"], 1000)
     cidx = CATEGORY_ORDER.index(cat) if cat in CATEGORY_ORDER else 1000
-    vidx = REVERB_ORDER.index(var) if var in REVERB_ORDER else 1000
-    return (cidx, cat.lower(), vidx, var.lower(), item["name"].lower())
+    ridx = REVERB_ORDER.index(var) if var in REVERB_ORDER else 1000
+    return (vidx_vol, cidx, cat.lower(), ridx, var.lower(), item["name"].lower())
 
 
 def group(items: list[dict]) -> OrderedDict:
     grouped: OrderedDict = OrderedDict()
     for item in items:
-        grouped.setdefault(item["category"], OrderedDict()).setdefault(
-            item["variant"], []
-        ).append(item)
+        grouped.setdefault(item["volume"], OrderedDict()).setdefault(
+            item["category"], OrderedDict()
+        ).setdefault(item["variant"], []).append(item)
     return grouped
 
 
@@ -88,46 +112,88 @@ def esc(s: str) -> str:
     )
 
 
-def render(items: list[dict]) -> str:
-    grouped = group(items)
-    total = len(items)
-    total_bytes = sum(i["bytes"] for i in items)
-    cats = len(grouped)
-
-    sections = []
-    for cat, variants in grouped.items():
-        cat_count = sum(len(v) for v in variants.values())
-        variant_blocks = []
-        for var, tracks in variants.items():
-            rows = []
-            for t in tracks:
-                src = "sounds/" + t["file"]
-                rows.append(
-                    f"""            <li class="track" data-name="{esc(t['name'].lower())}" data-file="{esc(t['filename'].lower())}" data-category="{esc(cat.lower())}" data-variant="{esc(var.lower())}">
+def render_tracks(tracks: list[dict]) -> str:
+    rows = []
+    for t in tracks:
+        var = t["variant"]
+        rows.append(
+            f"""            <li class="track" data-name="{esc(t['name'].lower())}" data-file="{esc(t['filename'].lower())}" data-category="{esc(t['category'].lower())}" data-variant="{esc(var.lower())}" data-volume="{esc(t['volume_title'].lower())}">
               <div class="track-meta">
                 <span class="track-name">{esc(t['name'])}</span>
                 <span class="track-file">{esc(t['filename'])} · {fmt_size(t['bytes'])}</span>
               </div>
-              <audio controls preload="none" src="{esc(src)}"></audio>
+              <audio controls preload="none" src="{esc(t['file'])}"></audio>
             </li>"""
-                )
-            variant_blocks.append(
-                f"""        <details class="variant" open>
-          <summary><span class="variant-name">{esc(var)}</span><span class="count">{len(tracks)}</span></summary>
+        )
+    return "\n".join(rows)
+
+
+def render(items: list[dict]) -> str:
+    grouped = group(items)
+    total = len(items)
+    total_bytes = sum(i["bytes"] for i in items)
+    vol_meta = {v["id"]: v for v in VOLUMES}
+
+    volume_blocks = []
+    toc = []
+    for vol_id, categories in grouped.items():
+        meta = vol_meta[vol_id]
+        vol_count = sum(
+            len(tracks)
+            for variants in categories.values()
+            for tracks in variants.values()
+        )
+        vol_bytes = sum(
+            t["bytes"]
+            for variants in categories.values()
+            for tracks in variants.values()
+            for t in tracks
+        )
+        toc.append(
+            f'<a href="#{esc(vol_id)}">{esc(meta["title"])} <span class="count">{vol_count}</span></a>'
+        )
+        cat_sections = []
+        for cat, variants in categories.items():
+            cat_count = sum(len(v) for v in variants.values())
+            real_variants = [v for v in variants if v]
+            if real_variants:
+                inner_parts = []
+                for var, tracks in variants.items():
+                    label = var or "Default"
+                    inner_parts.append(
+                        f"""        <details class="variant" open>
+          <summary><span class="variant-name">{esc(label)}</span><span class="count">{len(tracks)}</span></summary>
           <ul class="tracks">
-{chr(10).join(rows)}
+{render_tracks(tracks)}
           </ul>
         </details>"""
-            )
-        sections.append(
-            f"""      <section class="category" data-category="{esc(cat.lower())}" data-label="{esc(cat)}">
-        <h2>{esc(cat)} <span class="count">{cat_count}</span></h2>
-{chr(10).join(variant_blocks)}
+                    )
+                inner = "\n".join(inner_parts)
+            else:
+                only = next(iter(variants.values()))
+                inner = f"""        <ul class="tracks">
+{render_tracks(only)}
+        </ul>"""
+            cat_sections.append(
+                f"""      <section class="category" data-category="{esc(cat.lower())}" data-volume="{esc(meta['title'].lower())}" data-label="{esc(cat)}">
+        <h3>{esc(cat)} <span class="count">{cat_count}</span></h3>
+{inner}
       </section>"""
+            )
+        volume_blocks.append(
+            f"""    <section class="volume" id="{esc(vol_id)}" data-volume="{esc(meta['title'].lower())}">
+      <div class="volume-head">
+        <h2>{esc(meta['title'])} <span class="count">{vol_count}</span></h2>
+        <p class="volume-meta">{fmt_size(vol_bytes)} · source: <a href="{esc(meta['source'])}">{esc(meta['source_label'])}</a></p>
+      </div>
+{chr(10).join(cat_sections)}
+    </section>"""
         )
 
-    body_sections = "\n".join(sections)
-    manifest_note = f"{total} sounds · {cats} categories · {fmt_size(total_bytes)}"
+    body_sections = "\n".join(volume_blocks)
+    toc_html = " · ".join(toc)
+    vol_count = len(grouped)
+    manifest_note = f"{total} sounds · {vol_count} volumes · {fmt_size(total_bytes)}"
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -135,7 +201,7 @@ def render(items: list[dict]) -> str:
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Diaper/ABDL soundpack — Viscep</title>
-  <meta name="description" content="Listener for Viscep's Diaper/ABDL soundpack. All sounds by Viscep." />
+  <meta name="description" content="Listener for Viscep's Diaper/ABDL soundpacks, volumes 1 and 2. All sounds by Viscep." />
   <style>
     :root {{
       --bg: #12150f;
@@ -189,13 +255,14 @@ def render(items: list[dict]) -> str:
     .lede {{
       color: var(--muted);
       margin: 0 0 0.85rem;
-      max-width: 40rem;
+      max-width: 42rem;
     }}
-    .stats {{
+    .stats, .toc {{
       font-family: ui-sans-serif, system-ui, sans-serif;
       font-size: 0.8rem;
       color: var(--muted);
     }}
+    .toc {{ margin: 0.4rem 0 0; }}
     .toolbar {{
       position: sticky;
       top: 0;
@@ -226,6 +293,27 @@ def render(items: list[dict]) -> str:
       margin: 0.55rem 0 0;
       min-height: 1.2em;
     }}
+    .volume {{
+      margin: 0 0 2rem;
+    }}
+    .volume-head {{
+      margin: 0 0 0.85rem;
+      padding-bottom: 0.6rem;
+      border-bottom: 1px solid var(--line);
+    }}
+    .volume-head h2 {{
+      font-size: 1.55rem;
+      font-weight: 600;
+      margin: 0 0 0.25rem;
+      display: flex;
+      align-items: baseline;
+      gap: 0.55rem;
+    }}
+    .volume-meta {{
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }}
     .category {{
       background: var(--bg-raise);
       border: 1px solid var(--line);
@@ -233,8 +321,8 @@ def render(items: list[dict]) -> str:
       padding: 1rem 1rem 0.4rem;
       margin: 0 0 1rem;
     }}
-    .category h2 {{
-      font-size: 1.25rem;
+    .category h3 {{
+      font-size: 1.2rem;
       font-weight: 600;
       margin: 0 0 0.65rem;
       display: flex;
@@ -324,23 +412,30 @@ def render(items: list[dict]) -> str:
       <p class="eyebrow">Soundpack listener</p>
       <h1>Diaper/ABDL soundpack</h1>
       <p class="lede">
-        Sounds by <a href="https://viscep.itch.io/diaperabdl">Viscep</a>.
-        This page is a personal listener for the free pack published on
-        <a href="https://viscep.itch.io/diaperabdl">itch.io</a>.
+        Sounds by <a href="https://viscep.itch.io/">Viscep</a>.
+        This page is a personal listener for the free packs published on itch.io:
+        <a href="https://viscep.itch.io/diaperabdl">Vol. 1</a>
+        and
+        <a href="https://viscep.itch.io/diaperabdl-soundpack-vol-2">Vol. 2</a>.
         Please follow Viscep’s terms: free to use in your own work; do not redistribute or resell the audio.
       </p>
-      <p class="stats">{esc(manifest_note)} · MP3 versions (WAV originals are in the itch.io zip)</p>
+      <p class="stats">{esc(manifest_note)} · MP3 versions (WAV originals stay in the itch.io zips)</p>
+      <p class="toc">{toc_html}</p>
     </header>
     <div class="toolbar">
       <label for="q" class="visually-hidden" style="position:absolute;left:-9999px">Search sounds</label>
-      <input id="q" type="search" placeholder="Filter by name, category, or reverb…" autocomplete="off" />
+      <input id="q" type="search" placeholder="Filter by name, volume, category, or reverb…" autocomplete="off" />
       <p id="status"></p>
     </div>
     <main id="library">
 {body_sections}
     </main>
     <footer>
-      <p>All audio © Viscep. Source pack: <a href="https://viscep.itch.io/diaperabdl">viscep.itch.io/diaperabdl</a>. Credit is appreciated but not required by the author. Regenerated with <code>python3 build_site.py</code>.</p>
+      <p>All audio © Viscep. Sources:
+        <a href="https://viscep.itch.io/diaperabdl">vol. 1</a>
+        and
+        <a href="https://viscep.itch.io/diaperabdl-soundpack-vol-2">vol. 2</a>.
+        Credit is appreciated but not required by the author. Regenerated with <code>python3 build_site.py</code>.</p>
     </footer>
   </div>
   <script>
@@ -357,7 +452,8 @@ def render(items: list[dict]) -> str:
           el.dataset.name,
           el.dataset.file,
           el.dataset.category,
-          el.dataset.variant
+          el.dataset.variant,
+          el.dataset.volume
         ].join(" ");
         const ok = !needle || hay.includes(needle);
         el.classList.toggle("hidden", !ok);
@@ -371,6 +467,10 @@ def render(items: list[dict]) -> str:
         const any = cat.querySelector(".track:not(.hidden)");
         cat.classList.toggle("hidden", !any);
       }}
+      for (const vol of document.querySelectorAll(".volume")) {{
+        const any = vol.querySelector(".track:not(.hidden)");
+        vol.classList.toggle("hidden", !any);
+      }}
       status.textContent = needle
         ? (shown + " of " + total + " sounds match")
         : (total + " sounds");
@@ -378,7 +478,6 @@ def render(items: list[dict]) -> str:
     q.addEventListener("input", apply);
     apply();
 
-    // Only one clip at a time so previews don't overlap.
     document.getElementById("library").addEventListener("play", (event) => {{
       const current = event.target;
       if (current.tagName !== "AUDIO") return;
@@ -396,13 +495,16 @@ def main() -> None:
     items = collect()
     items.sort(key=sort_key)
     if not items:
-        raise SystemExit("No audio files found under sounds/")
+        raise SystemExit("No audio files found")
     (ROOT / "sounds.json").write_text(
         json.dumps(
             {
                 "title": "Diaper/ABDL soundpack",
                 "author": "Viscep",
-                "source": "https://viscep.itch.io/diaperabdl",
+                "sources": [
+                    {"id": v["id"], "title": v["title"], "url": v["source"]}
+                    for v in VOLUMES
+                ],
                 "count": len(items),
                 "bytes": sum(i["bytes"] for i in items),
                 "sounds": items,
@@ -412,9 +514,12 @@ def main() -> None:
         + "\n",
         encoding="utf-8",
     )
-    html = render(items)
-    (ROOT / "index.html").write_text(html, encoding="utf-8")
-    print(f"Wrote index.html and sounds.json ({len(items)} sounds)")
+    (ROOT / "index.html").write_text(render(items), encoding="utf-8")
+    by_vol = {}
+    for i in items:
+        by_vol.setdefault(i["volume"], 0)
+        by_vol[i["volume"]] += 1
+    print(f"Wrote index.html and sounds.json ({len(items)} sounds: {by_vol})")
 
 
 if __name__ == "__main__":
