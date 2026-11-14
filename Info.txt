@@ -1,0 +1,16 @@
+All of theese sounds are made by me (Viscep)
+My fa page: https://www.furaffinity.net/user/viscep
+My itch page: https://viscep.itch.io/
+All sounds within are free to use for your animations, games, or what-have-you, whether you use them as-is or edit them
+
+By using my sounds you are agreeing to the following terms:
+-Audio is not to be redistributed or resold
+-Audio may not be used as training data for public machine learning projects / data sets
+-Audio may not be used in any cryptocurrency or blockchain related media
+-Credit is not necessary, but is highly appreciated!
+
+If you come across this pack or the contained sounds being offered for sale, kindly inform me on furaffinity or itch.
+
+Tools used for mastering/cutting the audio: iZotope Ozone 8, iZotope RX 10, FL Studio 21, Acon Digital DeVerberate
+Tools used for reverb effect: Valhalla DSP Plate, Valhalla DSP Room
+Files: 1096 Folders: 36
