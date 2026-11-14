@@ -1,5 +1,6 @@
 # Diaper/ABDL soundpack listener
 
+https://redcommand025.github.io/viscep-diaper-soundpack
 A simple static page for listening to [Viscep’s Diaper/ABDL soundpack](https://viscep.itch.io/diaperabdl).
 
 All audio in this project was created by **[Viscep](https://viscep.itch.io/)**. The original pack is free on itch.io:
